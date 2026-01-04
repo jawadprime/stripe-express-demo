@@ -1,13 +1,15 @@
-import { Payment, Result, PaymentStatus, ok, RawEventVerificationSignature, RawEvent, okEmpty } from '@stripe-express-demo/shared';
+import { Payment, Result,  ok, RawEventVerificationSignature, RawEvent, okEmpty, IdempotencyKey, PaymentConfirmationSecret, HasCustomerId } from '@stripe-express-demo/shared';
 import { IPaymentGateway } from './payment-gateway';
 import { IPaymentOrchestrator } from './payment-orchestrator';
 import { IQueueMessageSender } from './queue-message-sender';
 import { IPaymentRepo } from './payment-repo';
+import { IUserRepo } from './user-repo';
 
 export class PaymentOrchestrator implements IPaymentOrchestrator{
     constructor(
         private readonly gateway: IPaymentGateway, 
-        private readonly repo: IPaymentRepo, 
+        private readonly paymentRepo: IPaymentRepo, 
+        private readonly userRepo: IUserRepo, 
         private readonly queueMessageSender: IQueueMessageSender
     ) {}
     
@@ -21,14 +23,17 @@ export class PaymentOrchestrator implements IPaymentOrchestrator{
         return okEmpty();
     }
 
-    async createOneTimePayment(payment: Payment): Promise<Result<Payment>> {
-        const result = await this.repo.createOneTimePayment(payment);
-        if (!result.ok) return result;
+    async createOneTimePayment(payment: Payment, idempotencyKey: IdempotencyKey): Promise<Result<PaymentConfirmationSecret>> {
+        const customerIdResult = await this.userRepo.FindUserCustomerId(payment.userId);
+        if(!customerIdResult.ok) return customerIdResult;
 
-        return ok(new Payment({
-        ...payment,
-        reference: result.value,
-        status: PaymentStatus.PENDING,
-        }));
+        const paymentWithCustomerId = payment.withCustomerId(customerIdResult.value as HasCustomerId); 
+        const createPaymentResult = await this.gateway.createOneTimePayment(paymentWithCustomerId, idempotencyKey);
+        if (!createPaymentResult.ok) return createPaymentResult;
+
+        const persistPaymentResult = await this.paymentRepo.persistPayment(createPaymentResult.value.payment, idempotencyKey);
+        if(!persistPaymentResult.ok) return persistPaymentResult;
+
+        return ok(createPaymentResult.value.clientSecret);
     }
 }

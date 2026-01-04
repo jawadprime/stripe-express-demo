@@ -9,12 +9,14 @@ import { serviceBusClient } from "@stripe-express-demo/shared";
 import { QueueMessageSender } from "../infrastructure/queue-message-sender.impl";
 import { env } from "../config/env";
 import { PaymentRepo } from "../infrastructure/payment-repo.impl";
+import { UserRepo } from "../infrastructure/user-repo.impl";
 const router = Router();
 
 const gateway = new MockStripePaymentGateway();
 const queueMessageSender = new QueueMessageSender(serviceBusClient(env.serviceBusConnectionString), env.queueName);
-const repo = new PaymentRepo()
-const orchestrator = new PaymentOrchestrator(gateway, repo, queueMessageSender);
+const paymentRepo = new PaymentRepo()
+const userRepo = new UserRepo()
+const orchestrator = new PaymentOrchestrator(gateway, paymentRepo, userRepo, queueMessageSender);
 const controller = new PaymentController(orchestrator);
 
 router.post(
